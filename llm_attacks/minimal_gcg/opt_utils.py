@@ -3,10 +3,9 @@ import gc
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModel
 
 from llm_attacks import get_embedding_matrix, get_embeddings
-
 
 def token_gradients(model, input_ids, input_slice, target_slice, loss_slice):
 
@@ -56,6 +55,8 @@ def token_gradients(model, input_ids, input_slice, target_slice, loss_slice):
             embeds[:,input_slice.stop:,:]
         ], 
         dim=1)
+    
+    full_embeds = full_embeds.to(dtype=next(model.parameters()).dtype) # making sure dtype matches model's (bfloat16 or float16)
     
     logits = model(inputs_embeds=full_embeds).logits
     targets = input_ids[target_slice]
@@ -181,23 +182,16 @@ def target_loss(logits, ids, target_slice):
     loss = crit(logits[:,loss_slice,:].transpose(1,2), ids[:,target_slice])
     return loss.mean(dim=-1)
 
-
-def load_model_and_tokenizer(model_path, tokenizer_path=None, device='cuda:0', **kwargs):
-    model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.float16,
-            trust_remote_code=True,
-            **kwargs
-        ).to(device).eval()
-    
-    tokenizer_path = model_path if tokenizer_path is None else tokenizer_path
+def load_model_and_tokenizer(model_path, tokenizer_path=None, device='cuda:0', model_type='causal', **kwargs):
+    if tokenizer_path is None:
+        tokenizer_path = model_path
     
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path,
         trust_remote_code=True,
         use_fast=False
     )
-    
+
     if 'oasst-sft-6-llama-30b' in tokenizer_path:
         tokenizer.bos_token_id = 1
         tokenizer.unk_token_id = 0
@@ -211,5 +205,22 @@ def load_model_and_tokenizer(model_path, tokenizer_path=None, device='cuda:0', *
         tokenizer.padding_side = 'left'
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
-    
+
+    if model_type == 'llada':
+        # Specific loading logic for LLaDA
+        model = AutoModel.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+            **kwargs
+        ).to(device).eval()
+    else:
+        # Default: causal models (LLaMA, Vicuna, etc.)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+            **kwargs
+        ).to(device).eval()
+
     return model, tokenizer

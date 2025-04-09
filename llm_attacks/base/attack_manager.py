@@ -35,6 +35,8 @@ def get_embedding_layer(model):
         return model.model.embed_tokens
     elif isinstance(model, GPTNeoXForCausalLM):
         return model.base_model.embed_in
+    elif model.__class__.__name__ == 'LLaDAModelLM':
+        return model.get_input_embeddings()
     else:
         raise ValueError(f"Unknown model type: {type(model)}")
 
@@ -45,6 +47,8 @@ def get_embedding_matrix(model):
         return model.model.embed_tokens.weight
     elif isinstance(model, GPTNeoXForCausalLM):
         return model.base_model.embed_in.weight
+    elif model.__class__.__name__ == 'LLaDAModelLM':
+        return model.get_input_embeddings().weight
     else:
         raise ValueError(f"Unknown model type: {type(model)}")
 
@@ -55,6 +59,8 @@ def get_embeddings(model, input_ids):
         return model.model.embed_tokens(input_ids)
     elif isinstance(model, GPTNeoXForCausalLM):
         return model.base_model.embed_in(input_ids).half()
+    elif model.__class__.__name__ == 'LLaDAModelLM':
+        return model.get_input_embeddings()(input_ids).half()
     else:
         raise ValueError(f"Unknown model type: {type(model)}")
 
@@ -238,7 +244,8 @@ class AttackPrompt(object):
         output_ids = model.generate(input_ids, 
                                     attention_mask=attn_masks, 
                                     generation_config=gen_config,
-                                    pad_token_id=self.tokenizer.pad_token_id)[0]
+                                    pad_token_id=self.tokenizer.pad_token_id,
+                                    use_cache=False)[0]
 
         return output_ids[self._assistant_role_slice.stop:]
     
@@ -1405,7 +1412,10 @@ class EvaluateAttack(object):
                         batch_attention_mask = batch_inputs['attention_mask'].to(model.device)
                         # position_ids = batch_attention_mask.long().cumsum(-1) - 1
                         # position_ids.masked_fill_(batch_attention_mask == 0, 1)
-                        outputs = model.generate(batch_input_ids, attention_mask=batch_attention_mask, max_new_tokens=max(max_new_len, max(batch_max_new)))
+                        outputs = model.generate(batch_input_ids, 
+                                                 attention_mask=batch_attention_mask, 
+                                                 max_new_tokens=max(max_new_len, max(batch_max_new)), 
+                                                 use_cache=False)
                         batch_outputs = tokenizer.batch_decode(outputs, skip_special_tokens=True)
                         gen_start_idx = [len(tokenizer.decode(batch_input_ids[i], skip_special_tokens=True)) for i in range(len(batch_input_ids))]
                         batch_outputs = [output[gen_start_idx[i]:] for i, output in enumerate(batch_outputs)]
