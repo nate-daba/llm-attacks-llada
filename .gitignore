@@ -1,2 +1,5 @@
 __pycache__
 llm_attacks.egg-info/
+.DS_Store
+._.DS_Store
+results/
